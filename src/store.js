@@ -12,7 +12,7 @@ export class Store {
     this.filename = path.join(directory, 'state.json');
     this.warning = '';
     this.corrupt = false;
-    this.state = { version: 1, settings: { theme: 'dark', mode: 'reader', width: 84, step: 'auto' }, books: [], lastBook: null };
+    this.state = { version: 1, settings: { theme: 'dark', mode: 'reader', width: 'auto', reflow: false, step: 'auto' }, books: [], lastBook: null };
     try {
       const input = JSON.parse(fs.readFileSync(this.filename, 'utf8'));
       if (!input || input.version !== 1 || !Array.isArray(input.books)) throw new Error('bad state');
@@ -22,7 +22,8 @@ export class Store {
       const s = input.settings || {};
       if (['dark', 'light', 'terminal'].includes(s.theme)) this.state.settings.theme = s.theme;
       if (['reader', 'code'].includes(s.mode)) this.state.settings.mode = s.mode;
-      if (Number.isFinite(s.width)) this.state.settings.width = Math.max(36, Math.min(120, Math.round(s.width)));
+      if (Number.isFinite(s.width)) this.state.settings.width = Math.max(36, Math.min(500, Math.round(s.width)));
+      if (typeof s.reflow === 'boolean') this.state.settings.reflow = s.reflow;
       if (Number.isInteger(s.step) && s.step >= 1 && s.step <= 200) this.state.settings.step = s.step;
     } catch (error) {
       if (error.code !== 'ENOENT') { this.warning = '进度文件异常；旧文件将在下次保存时备份。'; this.corrupt = true; }

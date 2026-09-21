@@ -47,7 +47,7 @@ export function decodeBuffer(buffer) {
 
 export function findChapters(text) {
   const chapters = [];
-  const heading = /^(?:第[\d０-９〇零一二三四五六七八九十百千万两]{1,14}[章节回卷部篇集](?:[\s\u3000:：、.．]|$|[^\d])|chapter\s+[\divxlc]+\b|(?:序章|楔子|引子|序言|前言|后记|尾声|终章|番外)(?:\s|[：:.、]|$))/iu;
+  const heading = /^(?:第[\d０-９〇○零一二三四五六七八九十百千万两]{1,14}[章节回卷部篇集](?:[\s\u3000:：、.．]|$|[^\d])|chapter\s+[\divxlc]+\b|(?:序章|楔子|引子|序言|前言|后记|尾声|终章|番外)(?:\s|[：:.、]|$))/iu;
   let offset = 0;
   for (const line of text.split('\n')) {
     const label = line.trim().replace(/^#{1,6}\s*/, '');

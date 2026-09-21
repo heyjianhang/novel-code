@@ -15,7 +15,9 @@ export const commands = [
   { command: '/goto', label: '跳转页码或百分比', hint: '/goto ' },
   { command: '/mode', label: '切换阅读 / 代码助手外观' },
   { command: '/theme', label: '切换深色 / 浅色 / 终端主题' },
-  { command: '/width', label: '调整正文宽度（36–120）', hint: '/width ' },
+  { command: '/width', label: '正文宽度（auto 或 36–500）', hint: '/width ' },
+  { command: '/reflow', label: '合并正文硬换行（on / off）', hint: '/reflow ' },
+  { command: '/work', label: '锁定文字输入，只保留翻页；F2 恢复' },
   { command: '/step', label: '每次翻动行数（如 /step 5）', hint: '/step ' },
   { command: '/help', label: '快捷键和使用说明' },
   { command: '/quit', label: '保存并退出' },
@@ -28,7 +30,9 @@ const help = [
   ['Esc', '隐藏正文；再次按下恢复'], ['/', '命令菜单'], ['q / Ctrl+C', '保存并退出'],
   ['/open 路径', '支持空格、中文、拖入文件'], ['/goto 35% 或 /goto 12', '跳转到进度或页码'],
   ['/mode reader | code', '外观切换'], ['/theme dark | light | terminal', '主题切换'],
-  ['/width 84', '正文宽度，以终端列为单位'], ['文件格式', 'TXT / 纯文本 MD；UTF-8、GB18030、UTF-16'],
+  ['/width auto | 120', '自适应宽度，或指定 36–500 列'], ['/reflow on | off', '合并中文正文硬换行 / 保留原始换行'],
+  ['/work / F2', '乱打字不显示；方向键翻页；F2 恢复输入'], ['字号', '在终端的字体设置中调整'],
+  ['文件格式', 'TXT / 纯文本 MD；UTF-8、GB18030、UTF-16'],
   ['/step 5', '每次翻动 5 个显示行（含空行）'], ['/step auto', '恢复整页翻动；/step 查看当前值'],
 ];
 
@@ -39,7 +43,7 @@ export class ReaderApp {
     this.book = null; this.offset = 0; this.wrapped = []; this.rowIndex = 0;
     this.input = ''; this.inputActive = false; this.panel = null; this.selection = 0;
     this.message = store.warning; this.highlight = ''; this.results = []; this.resultIndex = -1;
-    this.cover = false; this.closed = false; this.started = false;
+    this.cover = false; this.workMode = false; this.closed = false; this.started = false;
     this.saveTimer = null; this.drawTimer = null;
     this.cacheWidth = 0; this.cacheBook = null;
     this.handleKey = this.handleKey.bind(this);
@@ -69,9 +73,10 @@ export class ReaderApp {
   reflow() {
     if (!this.book) return;
     const d = dimensions(this.columns, this.rows, this.store.state.settings.width);
-    if (this.cacheWidth !== d.contentWidth || this.cacheBook !== this.book) {
-      this.wrapped = wrapBook(this.book.text, d.contentWidth);
-      this.cacheWidth = d.contentWidth; this.cacheBook = this.book;
+    const reflow = this.store.state.settings.reflow;
+    if (this.cacheWidth !== d.contentWidth || this.cacheBook !== this.book || this.cacheReflow !== reflow) {
+      this.wrapped = wrapBook(this.book.text, d.contentWidth, { reflow, chapterOffsets: this.book.chapters.map(ch => ch.offset) });
+      this.cacheWidth = d.contentWidth; this.cacheBook = this.book; this.cacheReflow = reflow;
     }
     this.rowIndex = rowAt(this.wrapped, this.offset);
   }
@@ -130,6 +135,12 @@ export class ReaderApp {
     this.panel = panel; this.input = input; this.inputActive = true; this.selection = 0;
   }
   closePanel() { this.panel = null; this.input = ''; this.inputActive = false; this.selection = 0; }
+
+  setWorkMode(enabled) {
+    this.workMode = enabled;
+    this.closePanel(); this.cover = false;
+    this.message = enabled ? '输入已锁定 · 方向键翻页 · F2 恢复输入' : '已恢复输入';
+  }
 
   panelMeta() {
     const metadata = {
@@ -223,9 +234,30 @@ export class ReaderApp {
         this.store.state.settings.mode = mode; this.message = mode === 'code' ? '已切换代码助手外观' : '已切换阅读外观'; this.queueSave(); break;
       }
       case '/width': {
-        const value = Number(argument);
-        if (!Number.isInteger(value) || value < 36 || value > 120) throw new Error('用法：/width 84（36–120 个终端列）');
-        this.store.state.settings.width = value; this.reflow(); this.queueSave(); break;
+        if (argument) {
+          if (argument !== 'auto' && (!/^\d+$/.test(argument) || Number(argument) < 36 || Number(argument) > 500)) {
+            throw new Error('用法：/width auto，或 /width 120（36–500 个终端列）');
+          }
+          this.store.state.settings.width = argument === 'auto' ? 'auto' : Number(argument);
+          this.reflow(); this.queueSave();
+        }
+        const setting = this.store.state.settings.width;
+        const current = dimensions(this.columns, this.rows, setting).contentWidth;
+        this.message = `正文宽度：${setting === 'auto' ? '自适应' : setting + ' 列'}（当前 ${current} 列） · /reflow on 可合并硬换行`;
+        break;
+      }
+      case '/reflow': {
+        if (argument) {
+          if (!['on', 'off'].includes(argument)) throw new Error('用法：/reflow on | off');
+          this.store.state.settings.reflow = argument === 'on'; this.reflow(); this.queueSave();
+        }
+        this.message = this.store.state.settings.reflow ? '已合并中文正文硬换行 · /reflow off 恢复原始排版' : '保留文件原始换行 · /reflow on 合并正文硬换行';
+        break;
+      }
+      case '/work': {
+        if (argument && !['on', 'off'].includes(argument)) throw new Error('用法：/work，或 /work on | off；F2 恢复输入');
+        this.setWorkMode(argument ? argument === 'on' : !this.workMode);
+        break;
       }
       case '/step': {
         if (argument) {
@@ -276,6 +308,16 @@ export class ReaderApp {
     if (this.closed) return;
     try {
       if (key.ctrl && ['c', 'd'].includes(key.name)) { this.stop(); return; }
+      if (key.name === 'f2') { this.setWorkMode(!this.workMode); this.scheduleDraw(); return; }
+      if (this.workMode) {
+        // Ignore printable keys, shortcuts, paste, Space and Enter before they
+        // reach any input, menu, bookmark or file-opening handler.
+        if (key.name === 'escape') this.cover = !this.cover;
+        else if (!this.cover && ['down', 'right', 'pagedown'].includes(key.name)) this.turnPage(1);
+        else if (!this.cover && ['up', 'left', 'pageup'].includes(key.name)) this.turnPage(-1);
+        else return;
+        this.scheduleDraw(); return;
+      }
       if (this.cover) { if (key.name === 'escape') this.cover = false; else if (char === 'q') this.stop(); this.scheduleDraw(); return; }
       if (key.name === 'escape') {
         if (this.inputActive || this.panel) this.closePanel();

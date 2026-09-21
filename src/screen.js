@@ -7,10 +7,10 @@ const palettes = {
   terminal: { bg: null, text: null, dim: [138, 138, 138], accent: [225, 144, 103], rule: [104, 104, 104], selected: [52, 52, 52], good: [154, 188, 146] },
 };
 
-export function dimensions(columns, rows, requested = 84) {
+export function dimensions(columns, rows, requested = 'auto') {
   const w = Math.max(1, Math.floor(columns));
   const h = Math.max(1, Math.floor(rows));
-  const contentWidth = Math.max(12, Math.min(requested, w - 8));
+  const contentWidth = Math.max(12, Math.min(requested === 'auto' ? w - 8 : requested, w - 8));
   return { columns: w, rows: h, contentWidth, bodyHeight: Math.max(1, h - 13), left: Math.floor((w - contentWidth) / 2) };
 }
 
@@ -36,18 +36,18 @@ export function renderScreen(app, columns = 100, rows = 35, color = true) {
   if (columns < 38 || rows < 17) {
     add(); margin('✦ Novel', 'accent'); add();
     margin('请将终端调大一些'); margin('建议至少 38 列 × 17 行', 'dim'); add();
-    margin('按 q 或 Ctrl+C 退出', 'dim');
+    margin(app.workMode ? 'F2 恢复输入 · Ctrl+C 退出' : '按 q 或 Ctrl+C 退出', 'dim');
     while (lines.length < d.rows) add();
     return lines.slice(0, rows).join('\n') + (noColor ? '' : '\x1b[0m');
   }
-  const code = app.store.state.settings.mode === 'code';
+  const code = app.workMode || app.store.state.settings.mode === 'code';
   if (app.cover) {
     add(); margin('✦ Code Session', 'accent'); margin('~/workspace/app', 'dim'); add();
     margin('● Reviewing project structure…'); add();
     margin('  src/'); margin('  ├── modules/'); margin('  ├── components/'); margin('  └── utils/'); add();
     margin('  Waiting for next instruction.', 'dim');
     while (lines.length < d.rows - 4) add();
-    rule(); margin('❯'); rule(); margin('  session ready', 'dim');
+    rule(); margin('❯'); rule(); margin(app.workMode ? 'Esc 返回 · F2 恢复输入 · Ctrl+C 退出' : '  session ready', 'dim');
     return lines.slice(0, d.rows).join('\n') + (noColor ? '' : '\x1b[0m');
   }
   const book = app.book;
@@ -116,12 +116,12 @@ export function renderScreen(app, columns = 100, rows = 35, color = true) {
   let shown = input;
   const limit = d.columns - width(prefix) - 6;
   while (width(shown) > limit) shown = graphemeTail(shown);
-  const placeholder = app.panel === 'help' ? 'Esc 返回' : app.panel ? '输入文字筛选，↑↓ 选择，Enter 确认' : code ? '输入 / 查看命令' : '输入 / 查看命令，或粘贴文件路径';
+  const placeholder = app.workMode ? 'Context ready' : app.panel === 'help' ? 'Esc 返回' : app.panel ? '输入文字筛选，↑↓ 选择，Enter 确认' : code ? '输入 / 查看命令' : '输入 / 查看命令，或粘贴文件路径';
   margin(prefix + (shown || (!app.inputActive ? placeholder : '')) + (app.inputActive ? '▏' : ''), app.inputActive ? 'text' : 'dim');
   rule();
   const next = app.store.state.settings.step === 'auto' ? '下一页' : `下翻${app.pageStep}行`;
   const previous = app.store.state.settings.step === 'auto' ? '上一页' : `上翻${app.pageStep}行`;
-  margin(app.panel ? '↑↓ 选择   Enter 确认   Esc 返回' : d.columns < 65 ? `↓↑ ${app.store.state.settings.step === 'auto' ? '翻页' : app.pageStep + '行'}  空格 下翻  / 命令  q 退出` : `空格/↓ ${next}   ↑/← ${previous}   j/k 逐行   / 命令   q 退出`, 'dim');
+  margin(app.workMode ? (d.columns < 65 ? '↓↑ 翻页  F2 解锁  Ctrl+C 退出' : `↓/→ ${next}   ↑/← ${previous}   F2 恢复输入   Ctrl+C 退出`) : app.panel ? '↑↓ 选择   Enter 确认   Esc 返回' : d.columns < 65 ? `↓↑ ${app.store.state.settings.step === 'auto' ? '翻页' : app.pageStep + '行'}  空格 下翻  / 命令  q 退出` : `空格/↓ ${next}   ↑/← ${previous}   j/k 逐行   / 命令   F2 锁定输入   q 退出`, 'dim');
   pair(code ? 'local session' : '离线 · 无需账号', `${book.encoding} · ${code ? 'context.md' : 'TXT'}`, 'dim');
   return lines.slice(0, d.rows).join('\n') + (noColor ? '' : '\x1b[0m');
 }

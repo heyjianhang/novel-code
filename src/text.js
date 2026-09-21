@@ -70,13 +70,42 @@ export function wrapLine(text, columns, start = 0) {
   return rows;
 }
 
-export function wrapBook(text, columns) {
+export function wrapBook(text, columns, { reflow = false, chapterOffsets = [] } = {}) {
   const rows = [];
-  let offset = 0;
+  const headings = new Set(chapterOffsets);
+  let offset = 0, length = 0, previous = '', previousHeading = false;
+  let parts = [];
+  const flush = () => {
+    if (!parts.length) return;
+    // Display-only reflow: map joined lines back to their original UTF-16 offsets.
+    // Saved positions, chapters, bookmarks and search continue to use the source.
+    const sourceOffset = value => {
+      let low = 0, high = parts.length - 1;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (parts[mid].display <= value) low = mid; else high = mid - 1;
+      }
+      return parts[low].source + value - parts[low].display;
+    };
+    for (const row of wrapLine(parts.map(p => p.text).join(''), columns)) {
+      rows.push({ text: row.text, start: sourceOffset(row.start), end: sourceOffset(row.end) });
+    }
+    parts = []; length = 0;
+  };
   for (const line of text.split('\n')) {
-    rows.push(...wrapLine(line, columns, offset));
+    const heading = headings.has(offset);
+    // Join long Chinese prose continuations only. Blank lines, indents, short
+    // verse lines, headings and non-Chinese text keep their original breaks.
+    const join = reflow && !heading && !previousHeading && line && previous
+      && !/^[\s\u3000]/u.test(line) && /\p{Script=Han}/u.test(line)
+      && /\p{Script=Han}/u.test(previous) && width(previous) >= 48;
+    if (!join) flush();
+    parts.push({ text: line, source: offset, display: length });
+    length += line.length;
     offset += line.length + 1;
+    previous = line; previousHeading = heading;
   }
+  flush();
   return rows;
 }
 

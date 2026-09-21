@@ -47,7 +47,7 @@ npm install -g --prefix "$HOME/.local" novel-code
 
 ## 离线安装 / 源码运行
 
-已获得 npm 安装包的用户可执行 `npm install -g /路径/novel-code-0.1.2.tgz`。已解压源码的用户可以在源码目录执行 `node bin/novel-code.js`，或运行 `npm install -g .`。
+已获得 npm 安装包的用户可执行 `npm install -g /路径/novel-code-0.2.0.tgz`。已解压源码的用户可以在源码目录执行 `node bin/novel-code.js`，或运行 `npm install -g .`。
 
 从 GitHub 获取源码：
 
@@ -74,6 +74,7 @@ macOS 也可以双击源码目录中的 `启动阅读器.command`。若 macOS �
 | b | 添加或取消当前页首书签 |
 | / | 命令菜单；↑↓ 选择，Tab 补全，Enter 执行 |
 | Esc | 在正文隐藏 / 恢复；在菜单返回正文 |
+| F2 | 开启 / 关闭乱打字模式（部分 Mac 键盘需 Fn+F2） |
 | q、Ctrl+C、Ctrl+D | 保存退出 |
 
 主界面支持粘贴或拖入文件的绝对路径后按 Enter，也可以先输入 `/open ` 再粘贴路径。在命令输入中支持退格、Ctrl+U 清空、Ctrl+W 删除末尾单词；这一版暂不支持移动输入光标到中间编辑。
@@ -87,6 +88,30 @@ macOS 也可以双击源码目录中的 `启动阅读器.command`。若 macOS �
 输入 `/step` 查看当前设置，`/step auto` 恢复整页翻动。设置自动保存，下次启动仍生效。底部快捷键提示会同步显示“下翻5行 / 上翻5行”。从 0.1.0 升级会保留已有阅读进度，默认翻动方式仍为整页；已打开的阅读器需要退出后重启。
 
 0.1.2 修正了 `/step` 对 ↑ / ↓ 不生效的问题。更新源码或安装新版后，请退出已打开的阅读器并重新启动。
+
+## 宽度、换行和字号
+
+输入 `/width auto`，正文会随窗口变宽、变窄；新安装默认使用这个设置。也可以输入 `/width 120` 固定阅读栏宽度，支持 36–500 个终端列，一个汉字通常占两列。旧版保存的宽度会保留，可用 `/width auto` 切换；`/width` 查看当前设置。
+
+有些 TXT（例如 Project Gutenberg 的中文小说）在文件里已经每隔几十字换行。只扩大阅读栏不会合并这些换行。输入 `/reflow on`，会合并较长中文正文的连续行，再按窗口排版；空行、章节标题、缩进的新段落、短诗行和非中文文本保留原换行。此功能按文字特征判断，特殊排版不合适时输入 `/reflow off` 恢复。只调整显示，不修改原文件；搜索、书签和进度仍对应原文位置。宽度和重排设置都会保存。
+
+字号和字体由终端控制，请在 Terminal、iTerm2 或所用终端的字体设置中调整。阅读器的 `/width` 改变每行容量，不会改变字体大小。
+
+## 乱打字模式
+
+输入 `/work` 或按 F2 开启：保持代码助手外观和当前阅读页，随意敲字母、数字、中文、标点、空格、回车、退格或粘贴文字，都不会显示输入，也不会触发 q、b、c 等阅读快捷键。
+
+- ↓ / → / PageDown 下翻，↑ / ← / PageUp 上翻，沿用 `/step` 行数。
+- F2 恢复正常输入；部分 Mac 键盘需要按 Fn+F2，再输入 `/step`、`/width` 等命令。
+- Esc 仍可隐藏 / 恢复正文；Ctrl+C 或 Ctrl+D 保存退出。
+
+普通文字键不会自动翻页。模式只对当前会话生效，下次启动默认恢复输入，也可以通过 `--work` 直接进入：
+
+```sh
+novel-code "/路径/小说.txt" --width auto --reflow on --work
+```
+
+关闭模式后恢复之前的阅读外观。此功能只改变界面与键盘响应，不会执行输入的代码或操作其他程序。
 
 ## 命令
 
@@ -104,7 +129,10 @@ macOS 也可以双击源码目录中的 `启动阅读器.command`。若 macOS �
 | `/theme light` | 指定主题 |
 | `/mode` | 轮换 reader、code 外观 |
 | `/mode code` | 代码助手风格：Read 状态、底部输入框；正文保持正常排版 |
-| `/width 84` | 正文宽度，36–120 个终端列（通常一个汉字占两列） |
+| `/width auto`、`/width 120` | 正文自适应宽度，或指定 36–500 列 |
+| `/width` | 查看设定和当前实际宽度 |
+| `/reflow on`、`/reflow off` | 合并中文正文硬换行 / 恢复原始换行，自动保存 |
+| `/work` | 开启 / 关闭乱打字模式；锁定时用 F2 恢复输入 |
 | `/step 5` | 每次翻动 5 个显示行（1–200，最多一屏），自动保存 |
 | `/step`、`/step auto` | 查看翻动设置 / 恢复整页 |
 | `/help`、`/quit` | 帮助 / 保存退出 |
@@ -128,6 +156,7 @@ macOS 也可以双击源码目录中的 `启动阅读器.command`。若 macOS �
 npm test
 node bin/novel-code.js --demo
 node bin/novel-code.js --demo --mode code
+node bin/novel-code.js --demo --width auto --reflow on --work
 node bin/novel-code.js --demo --preview --plain --columns 100 --rows 35
 npm pack
 ```
