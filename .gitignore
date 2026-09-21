@@ -1,0 +1,13 @@
+node_modules/
+coverage/
+work/
+*.tgz
+*.log
+.DS_Store
+.npmrc
+.env
+.env.*
+!.env.example
+state.json
+state.json.*
+.novel-code/

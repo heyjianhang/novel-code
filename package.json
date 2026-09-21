@@ -1,0 +1,21 @@
+{
+  "name": "novel-code",
+  "version": "0.1.2",
+  "description": "A local-first Chinese terminal novel reader with a coding-assistant inspired interface.",
+  "repository": { "type": "git", "url": "git+https://github.com/heyjianhang/novel-code.git" },
+  "homepage": "https://github.com/heyjianhang/novel-code#readme",
+  "bugs": { "url": "https://github.com/heyjianhang/novel-code/issues" },
+  "type": "module",
+  "bin": { "novel-code": "bin/novel-code.js" },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "scripts": {
+    "start": "node bin/novel-code.js",
+    "demo": "node bin/novel-code.js --demo",
+    "test": "node --test",
+    "prepack": "node --test"
+  },
+  "files": ["bin/", "src/", "examples/", "README.md", "LICENSE", "启动阅读器.command"],
+  "license": "MIT",
+  "keywords": ["novel", "reader", "cli", "tui", "chinese"]
+}
