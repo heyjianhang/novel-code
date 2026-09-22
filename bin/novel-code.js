@@ -6,7 +6,7 @@ import { renderScreen } from '../src/screen.js';
 import { safeText } from '../src/text.js';
 
 const usage = `
-  ✦ Novel Code 0.2.0
+  ✦ Novel Code 0.3.0
   在终端里安静读完一本书。
 
   用法
@@ -15,20 +15,21 @@ const usage = `
     novel-code --mode code      以代码助手外观启动
     novel-code --width auto     正文宽度跟随窗口
     novel-code --reflow on      合并中文正文的硬换行
-    novel-code --work           乱打字不输入，只保留翻页
+    novel-code --work           乱打字模式；/ 唤起命令
     novel-code --help           显示帮助
     novel-code --version        显示版本
 
   界面
     空格 / ↓ / → 下翻    ↑ / ← 上翻    /step 5 每次翻动 5 行
     c 章节    s 搜索    b 书签    Esc 隐藏 / 恢复    q 退出
-    F2 锁定 / 恢复输入；锁定时方向键翻页，Ctrl+C 退出
+    工作模式：/ 唤起命令，方向键翻页，/work off 或 F2 退出模式
 
   命令
     /open 路径    /books    /chapters    /search 关键词
     /bookmarks    /goto 35%    /theme    /mode    /help
     /step 5 每次翻动 5 行    /step auto 恢复整页
     /width auto 或 /width 120    /reflow on | off    /work
+    /auto 10 每 10 秒自动翻动    /auto off 停止    /auto 查看状态
 
   字号由终端的字体设置控制；一个汉字通常占两个终端列。
 
@@ -46,7 +47,7 @@ try {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--help' || arg === '-h') { console.log(usage); process.exit(0); }
-    if (arg === '--version' || arg === '-v') { console.log('0.2.0'); process.exit(0); }
+    if (arg === '--version' || arg === '-v') { console.log('0.3.0'); process.exit(0); }
     if (arg === '--demo') demo = true;
     else if (arg === '--preview') preview = true;
     else if (arg === '--plain') plain = true;

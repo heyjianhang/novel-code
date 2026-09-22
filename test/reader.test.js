@@ -18,8 +18,33 @@ function fixture(t) {
   const output = { columns: 100, rows: 35, write() {}, on() {}, off() {} };
   const store = new Store(path.join(dir, 'state'));
   const app = new ReaderApp(store, { output });
-  t.after(() => { clearTimeout(app.saveTimer); clearTimeout(app.drawTimer); fs.rmSync(dir, { recursive: true, force: true }); });
+  t.after(() => { app.autoTimers.clearTimeout(app.autoTimer); clearTimeout(app.saveTimer); clearTimeout(app.drawTimer); fs.rmSync(dir, { recursive: true, force: true }); });
   return { dir, output, store, app };
+}
+
+function timedFixture(t) {
+  const fixtureValue = fixture(t);
+  let now = 0, nextId = 1;
+  const pending = new Map();
+  const timers = {
+    setTimeout(fn, ms) { const id = nextId++; pending.set(id, { fn, at: now + ms }); return id; },
+    clearTimeout(id) { pending.delete(id); },
+  };
+  fixtureValue.app.autoTimers = timers;
+  return { ...fixtureValue, pending, tick(ms) {
+    const end = now + ms;
+    while (pending.size) {
+      const [id, timer] = [...pending].sort((a, b) => a[1].at - b[1].at)[0];
+      if (timer.at > end) break;
+      now = timer.at; pending.delete(id); timer.fn();
+    }
+    now = end;
+  } };
+}
+
+function typeCommand(app, command) {
+  for (const char of command) app.handleKey(char, { name: char });
+  app.handleKey('', { name: 'return' });
 }
 
 test('decodes UTF-8, GBK-compatible GB18030 and UTF-16 without damaging Chinese', () => {
@@ -269,8 +294,11 @@ test('work mode ignores typing and normal shortcuts, retaining only navigation a
   assert.ok(app.workMode);
   const screen = renderScreen(app, 100, 35, false);
   assert.match(screen, /Code Session/);
-  for (const char of 'qbcjksnp[]/quit abc123中文乱打字') app.handleKey(char, { name: char });
-  app.handleKey('/open /tmp/do-not-open.txt', {});
+  for (const char of 'qbcjksnp[]quit abc123中文乱打字') app.handleKey(char, { name: char });
+  app.handleKey('', { name: 'paste-start' });
+  for (const char of '/quit') app.handleKey(char, { name: char });
+  app.handleKey('', { name: 'return' });
+  app.handleKey('', { name: 'paste-end' });
   for (const name of ['return', 'space', 'tab', 'backspace', 'delete', 'home', 'end', 'paste-start', 'paste-end']) app.handleKey('', { name });
   app.handleKey('', { ctrl: true, name: 'w' });
   assert.equal(renderScreen(app, 100, 35, false), screen);
@@ -293,6 +321,95 @@ test('work mode ignores typing and normal shortcuts, retaining only navigation a
   const other = new ReaderApp(new Store(store.directory));
   assert.equal(other.workMode, false, 'input lock is session-only');
   app.handleKey('', { name: 'c', ctrl: true }); assert.ok(app.closed);
+});
+
+test('slash opens temporary command input in work mode and returns to locked reading', t => {
+  const { app } = fixture(t);
+  app.open(sample); app.execute('/work');
+  typeCommand(app, '/step 7');
+  assert.equal(app.store.state.settings.step, 7);
+  assert.ok(app.workMode); assert.equal(app.inputActive, false);
+  app.handleKey('q', { name: 'q' }); assert.equal(app.closed, false);
+  app.handleKey('', { name: 'down' }); assert.equal(app.rowIndex, 7);
+  typeCommand(app, '/chapters');
+  assert.equal(app.panel, 'chapters');
+  assert.match(renderScreen(app, 100, 35, false), /↑↓ 选择   Enter 确认   Esc 返回/);
+  app.handleKey('', { name: 'down' }); app.handleKey('', { name: 'return' });
+  assert.equal(app.panel, null); assert.ok(app.workMode);
+  assert.equal(app.offset, app.book.chapters[1].offset);
+  app.handleKey('/', { name: '/' }); app.handleKey('', { name: 'escape' });
+  assert.equal(app.inputActive, false); assert.equal(app.cover, false);
+  app.handleKey('/', { name: '/' }); app.handleKey('', { name: 'backspace' });
+  assert.equal(app.inputActive, false);
+  app.handleKey('/', { name: '/' }); app.handleKey('', { name: 'u', ctrl: true });
+  assert.equal(app.inputActive, false);
+  typeCommand(app, '/unknown-command');
+  assert.match(app.message, /找不到命令/); assert.equal(app.inputActive, false); assert.ok(app.workMode);
+  typeCommand(app, '/work off'); assert.equal(app.workMode, false);
+  app.handleKey('c', { name: 'c' }); assert.equal(app.panel, 'chapters');
+});
+
+test('auto paging observes the interval and current step; ignored work typing never delays it', t => {
+  const { app, tick, pending } = timedFixture(t);
+  app.open(sample); app.execute('/step 3'); app.execute('/work');
+  typeCommand(app, '/auto 10');
+  assert.equal(pending.size, 1);
+  assert.match(renderScreen(app, 100, 35, false), /自动 10s/);
+  tick(6000); assert.equal(app.rowIndex, 0);
+  for (const char of 'qbcjk xyz中文 123') app.handleKey(char, { name: char });
+  tick(3999); assert.equal(app.rowIndex, 0);
+  tick(1); assert.equal(app.rowIndex, 3); assert.equal(pending.size, 1);
+  tick(10000); assert.equal(app.rowIndex, 6);
+  tick(9000); app.handleKey('', { name: 'down' }); assert.equal(app.rowIndex, 9);
+  tick(1000); assert.equal(app.rowIndex, 9, 'manual navigation restarts the full interval');
+  tick(9000); assert.equal(app.rowIndex, 12);
+  typeCommand(app, '/step 5'); tick(10000); assert.equal(app.rowIndex, 17);
+  typeCommand(app, '/auto off'); const anchor = app.offset;
+  assert.equal(pending.size, 0); tick(60000); assert.equal(app.offset, anchor);
+});
+
+test('auto paging pauses for commands, panels, cover and small terminals and resumes with a full interval', t => {
+  const { app, tick, pending, output } = timedFixture(t);
+  app.open(sample); app.execute('/step 1'); app.execute('/work'); typeCommand(app, '/auto 2');
+  tick(1000); app.handleKey('/', { name: '/' });
+  assert.equal(pending.size, 0); assert.match(renderScreen(app, 100, 35, false), /暂停/);
+  tick(20000); assert.equal(app.rowIndex, 0);
+  app.handleKey('', { name: 'escape' }); tick(1999); assert.equal(app.rowIndex, 0);
+  tick(1); assert.equal(app.rowIndex, 1);
+  typeCommand(app, '/chapters'); tick(10000); assert.equal(app.rowIndex, 1);
+  app.handleKey('', { name: 'escape' }); tick(2000); assert.equal(app.rowIndex, 2);
+  app.handleKey('', { name: 'escape' }); assert.ok(app.cover);
+  tick(10000); assert.equal(app.rowIndex, 2);
+  app.handleKey('', { name: 'escape' }); tick(2000); assert.equal(app.rowIndex, 3);
+  output.columns = 25; app.handleResize(); const offset = app.offset;
+  assert.equal(pending.size, 0); tick(10000); assert.equal(app.offset, offset);
+  output.columns = 100; app.handleResize(); tick(1999); assert.equal(app.offset, offset);
+  tick(1); assert.equal(app.rowIndex, 4);
+  app.handleKey('', { name: 'escape' }); app.handleKey('', { name: 'f2' });
+  assert.equal(app.cover, false); assert.equal(pending.size, 1);
+});
+
+test('auto paging validates intervals, stops at the end, on book changes and on exit, and never resumes on relaunch', t => {
+  const { app, store, dir, tick, pending } = timedFixture(t);
+  app.open(sample); app.execute('/auto on'); assert.equal(app.autoSeconds, 10);
+  for (const value of ['0', '-1', '1.5', '3601', '1e2', 'no', 'NaN']) {
+    assert.throws(() => app.execute('/auto ' + value), /1–3600/);
+    assert.equal(app.autoSeconds, 10); assert.equal(pending.size, 1);
+  }
+  app.execute('/auto'); assert.match(app.message, /每 10 秒/);
+  app.execute('/auto 3600'); assert.equal(app.autoSeconds, 3600);
+  app.execute('/step 5'); app.jump(app.wrapped[app.wrapped.length - app.bodyHeight - 2].start);
+  app.execute('/auto 1'); const before = app.rowIndex;
+  tick(1000); assert.equal(app.rowIndex, before + 2);
+  assert.equal(app.autoSeconds, 0); assert.equal(pending.size, 0); assert.match(app.message, /最后一页/);
+  app.jump(0); app.execute('/auto 1');
+  assert.throws(() => app.open(path.join(dir, 'missing.txt')), /找不到/);
+  assert.equal(app.autoSeconds, 1);
+  app.open(sample); assert.equal(app.autoSeconds, 0); assert.equal(pending.size, 0);
+  app.execute('/auto 1'); app.persist();
+  assert.equal(new ReaderApp(new Store(store.directory)).autoSeconds, 0);
+  app.stop(); assert.equal(pending.size, 0); const offset = app.offset;
+  tick(10000); assert.equal(app.offset, offset);
 });
 
 test('bookmarks can be added, jumped to, deleted and persisted', t => {
@@ -373,7 +490,7 @@ test('packaged CLI preview is read-only and non-TTY interaction fails cleanly', 
   assert.equal(piped.status, 1); assert.ok(piped.stderr.includes('交互式终端'));
   const work = spawnSync(process.execPath, ['bin/novel-code.js', '--demo', '--preview', '--plain', '--width', 'auto', '--reflow', 'on', '--work'], { cwd: root, env, encoding: 'utf8' });
   assert.equal(work.status, 0, work.stderr);
-  assert.match(work.stdout, /Code Session/); assert.match(work.stdout, /F2 恢复输入/);
+  assert.match(work.stdout, /Code Session/); assert.match(work.stdout, /唤起命令/);
   assert.ok(!fs.existsSync(env.NOVEL_CODE_HOME));
   for (const flags of [['--width', '501'], ['--width'], ['--reflow', 'yes'], ['--reflow']]) {
     const invalid = spawnSync(process.execPath, ['bin/novel-code.js', '--preview', ...flags], { cwd: root, env, encoding: 'utf8' });

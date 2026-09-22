@@ -17,8 +17,9 @@ export const commands = [
   { command: '/theme', label: '切换深色 / 浅色 / 终端主题' },
   { command: '/width', label: '正文宽度（auto 或 36–500）', hint: '/width ' },
   { command: '/reflow', label: '合并正文硬换行（on / off）', hint: '/reflow ' },
-  { command: '/work', label: '锁定文字输入，只保留翻页；F2 恢复' },
+  { command: '/work', label: '乱打字模式；/ 唤起命令，/work off 退出' },
   { command: '/step', label: '每次翻动行数（如 /step 5）', hint: '/step ' },
+  { command: '/auto', label: '自动翻页（如 /auto 10，每 10 秒）', hint: '/auto ' },
   { command: '/help', label: '快捷键和使用说明' },
   { command: '/quit', label: '保存并退出' },
 ];
@@ -31,13 +32,14 @@ const help = [
   ['/open 路径', '支持空格、中文、拖入文件'], ['/goto 35% 或 /goto 12', '跳转到进度或页码'],
   ['/mode reader | code', '外观切换'], ['/theme dark | light | terminal', '主题切换'],
   ['/width auto | 120', '自适应宽度，或指定 36–500 列'], ['/reflow on | off', '合并中文正文硬换行 / 保留原始换行'],
-  ['/work / F2', '乱打字不显示；方向键翻页；F2 恢复输入'], ['字号', '在终端的字体设置中调整'],
+  ['/work / F2', '乱打字不显示；/ 唤起命令；/work off 退出'], ['字号', '在终端的字体设置中调整'],
   ['文件格式', 'TXT / 纯文本 MD；UTF-8、GB18030、UTF-16'],
   ['/step 5', '每次翻动 5 个显示行（含空行）'], ['/step auto', '恢复整页翻动；/step 查看当前值'],
+  ['/auto 10 | off', '每 10 秒自动翻动；off 停止'], ['/auto', '查看状态；输入命令、菜单、隐藏时暂停'],
 ];
 
 export class ReaderApp {
-  constructor(store, { input = process.stdin, output = process.stdout } = {}) {
+  constructor(store, { input = process.stdin, output = process.stdout, autoTimers = { setTimeout, clearTimeout } } = {}) {
     this.store = store;
     this.stdin = input; this.stdout = output;
     this.book = null; this.offset = 0; this.wrapped = []; this.rowIndex = 0;
@@ -45,6 +47,8 @@ export class ReaderApp {
     this.message = store.warning; this.highlight = ''; this.results = []; this.resultIndex = -1;
     this.cover = false; this.workMode = false; this.closed = false; this.started = false;
     this.saveTimer = null; this.drawTimer = null;
+    this.autoTimers = autoTimers; this.autoTimer = null; this.autoSeconds = 0;
+    this.ignoreWorkPaste = false;
     this.cacheWidth = 0; this.cacheBook = null;
     this.handleKey = this.handleKey.bind(this);
     this.handleResize = () => { this.reflow(); this.scheduleDraw(); };
@@ -57,11 +61,29 @@ export class ReaderApp {
     const step = this.store.state.settings.step;
     return step === 'auto' ? this.bodyHeight : Math.min(step, this.bodyHeight);
   }
+  get autoPaused() { return this.inputActive || !!this.panel || this.cover || this.columns < 38 || this.rows < 17; }
+
+  resetAutoTimer() {
+    this.autoTimers.clearTimeout(this.autoTimer); this.autoTimer = null;
+    if (!this.autoSeconds || this.closed || !this.book || this.autoPaused) return;
+    if (this.rowIndex + this.bodyHeight >= this.wrapped.length) {
+      this.autoSeconds = 0; this.message = '已到最后一页 · 自动翻页已停止'; return;
+    }
+    // A new timeout after each turn avoids catching up with a burst of pages
+    // after sleep, slow rendering or a paused command/menu interaction.
+    this.autoTimer = this.autoTimers.setTimeout(() => {
+      this.autoTimer = null;
+      if (!this.closed && !this.autoPaused && this.autoSeconds) this.turnPage(1);
+      this.resetAutoTimer(); this.scheduleDraw();
+    }, this.autoSeconds * 1000);
+    this.autoTimer?.unref?.();
+  }
 
   open(filename) {
     // Load first, so a failed open never discards the current book or position.
     const book = loadBook(filename);
     if (this.book) this.persist();
+    this.autoSeconds = 0; this.resetAutoTimer();
     this.book = book;
     const saved = this.store.record(book);
     this.offset = Math.min(saved.offset, book.text.length - 1);
@@ -79,13 +101,14 @@ export class ReaderApp {
       this.cacheWidth = d.contentWidth; this.cacheBook = this.book; this.cacheReflow = reflow;
     }
     this.rowIndex = rowAt(this.wrapped, this.offset);
+    this.resetAutoTimer();
   }
 
   move(delta) {
     this.rowIndex = Math.max(0, Math.min(this.wrapped.length - 1, this.rowIndex + delta));
     this.offset = this.wrapped[this.rowIndex].start;
     this.message = this.rowIndex + this.bodyHeight >= this.wrapped.length ? '已到最后一页' : '';
-    this.queueSave();
+    this.queueSave(); this.resetAutoTimer();
   }
 
   jump(offset) {
@@ -133,13 +156,17 @@ export class ReaderApp {
 
   openPanel(panel, input = '') {
     this.panel = panel; this.input = input; this.inputActive = true; this.selection = 0;
+    this.resetAutoTimer();
   }
-  closePanel() { this.panel = null; this.input = ''; this.inputActive = false; this.selection = 0; }
+  closePanel() {
+    this.panel = null; this.input = ''; this.inputActive = false; this.selection = 0;
+    this.resetAutoTimer();
+  }
 
   setWorkMode(enabled) {
     this.workMode = enabled;
-    this.closePanel(); this.cover = false;
-    this.message = enabled ? '输入已锁定 · 方向键翻页 · F2 恢复输入' : '已恢复输入';
+    this.cover = false; this.closePanel();
+    this.message = enabled ? '工作模式 · / 唤起命令 · /work off 退出' : '已恢复输入';
   }
 
   panelMeta() {
@@ -259,6 +286,19 @@ export class ReaderApp {
         this.setWorkMode(argument ? argument === 'on' : !this.workMode);
         break;
       }
+      case '/auto': {
+        if (argument) {
+          if (!['on', 'off'].includes(argument) && (!/^[1-9]\d*$/.test(argument) || Number(argument) > 3600)) {
+            throw new Error('用法：/auto 10（1–3600 秒），/auto on 默认 10 秒，/auto off 停止');
+          }
+          this.autoSeconds = argument === 'off' ? 0 : argument === 'on' ? 10 : Number(argument);
+        }
+        this.message = this.autoSeconds
+          ? `自动翻页：每 ${this.autoSeconds} 秒翻动 ${this.pageStep} 行 · /auto off 停止`
+          : '自动翻页已停止 · /auto 10 每 10 秒翻动';
+        this.resetAutoTimer();
+        break;
+      }
       case '/step': {
         if (argument) {
           if (argument !== 'auto' && (!/^[1-9]\d*$/.test(argument) || Number(argument) > 200)) {
@@ -308,17 +348,27 @@ export class ReaderApp {
     if (this.closed) return;
     try {
       if (key.ctrl && ['c', 'd'].includes(key.name)) { this.stop(); return; }
+      if (this.ignoreWorkPaste) {
+        if (key.name === 'paste-end') this.ignoreWorkPaste = false;
+        return;
+      }
+      if (key.name === 'paste-start' && this.workMode && !this.inputActive && !this.panel) {
+        this.ignoreWorkPaste = true; return;
+      }
       if (key.name === 'f2') { this.setWorkMode(!this.workMode); this.scheduleDraw(); return; }
-      if (this.workMode) {
-        // Ignore printable keys, shortcuts, paste, Space and Enter before they
-        // reach any input, menu, bookmark or file-opening handler.
+      if (this.workMode && !this.inputActive && !this.panel) {
+        // Slash explicitly opens command input; other printable keys stay inert.
+        if (!this.cover && char === '/' && !key.ctrl && !key.meta) {
+          this.input = '/'; this.inputActive = true; this.selection = 0;
+          this.resetAutoTimer(); this.scheduleDraw(); return;
+        }
         if (key.name === 'escape') this.cover = !this.cover;
         else if (!this.cover && ['down', 'right', 'pagedown'].includes(key.name)) this.turnPage(1);
         else if (!this.cover && ['up', 'left', 'pageup'].includes(key.name)) this.turnPage(-1);
         else return;
-        this.scheduleDraw(); return;
+        this.resetAutoTimer(); this.scheduleDraw(); return;
       }
-      if (this.cover) { if (key.name === 'escape') this.cover = false; else if (char === 'q') this.stop(); this.scheduleDraw(); return; }
+      if (this.cover) { if (key.name === 'escape') this.cover = false; else if (char === 'q') this.stop(); this.resetAutoTimer(); this.scheduleDraw(); return; }
       if (key.name === 'escape') {
         if (this.inputActive || this.panel) this.closePanel();
         else this.cover = true;
@@ -366,7 +416,8 @@ export class ReaderApp {
         this.input = safeText(char); this.inputActive = true; this.selection = 0;
       }
     } catch (error) { this.message = safeText(error.message); }
-    this.scheduleDraw();
+    if (this.workMode && this.inputActive && !this.panel && !this.input) this.closePanel();
+    this.resetAutoTimer(); this.scheduleDraw();
   }
 
   scheduleDraw() {
@@ -388,6 +439,7 @@ export class ReaderApp {
   }
   stop() {
     if (this.closed) return;
+    this.autoSeconds = 0; this.resetAutoTimer();
     this.persist(); this.closed = true;
     clearTimeout(this.drawTimer); clearTimeout(this.saveTimer);
     if (this.started) {

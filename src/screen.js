@@ -116,13 +116,14 @@ export function renderScreen(app, columns = 100, rows = 35, color = true) {
   let shown = input;
   const limit = d.columns - width(prefix) - 6;
   while (width(shown) > limit) shown = graphemeTail(shown);
-  const placeholder = app.workMode ? 'Context ready' : app.panel === 'help' ? 'Esc 返回' : app.panel ? '输入文字筛选，↑↓ 选择，Enter 确认' : code ? '输入 / 查看命令' : '输入 / 查看命令，或粘贴文件路径';
+  const placeholder = app.panel === 'help' ? 'Esc 返回' : app.panel ? '输入文字筛选，↑↓ 选择，Enter 确认' : app.workMode ? '/ 唤起命令' : code ? '输入 / 查看命令' : '输入 / 查看命令，或粘贴文件路径';
   margin(prefix + (shown || (!app.inputActive ? placeholder : '')) + (app.inputActive ? '▏' : ''), app.inputActive ? 'text' : 'dim');
   rule();
   const next = app.store.state.settings.step === 'auto' ? '下一页' : `下翻${app.pageStep}行`;
   const previous = app.store.state.settings.step === 'auto' ? '上一页' : `上翻${app.pageStep}行`;
-  margin(app.workMode ? (d.columns < 65 ? '↓↑ 翻页  F2 解锁  Ctrl+C 退出' : `↓/→ ${next}   ↑/← ${previous}   F2 恢复输入   Ctrl+C 退出`) : app.panel ? '↑↓ 选择   Enter 确认   Esc 返回' : d.columns < 65 ? `↓↑ ${app.store.state.settings.step === 'auto' ? '翻页' : app.pageStep + '行'}  空格 下翻  / 命令  q 退出` : `空格/↓ ${next}   ↑/← ${previous}   j/k 逐行   / 命令   F2 锁定输入   q 退出`, 'dim');
-  pair(code ? 'local session' : '离线 · 无需账号', `${book.encoding} · ${code ? 'context.md' : 'TXT'}`, 'dim');
+  margin(app.panel ? '↑↓ 选择   Enter 确认   Esc 返回' : app.inputActive ? '↑↓ 选择   Tab 补全   Enter 执行   Esc 返回' : app.workMode ? (d.columns < 65 ? '↓↑ 翻页  / 命令  F2 解锁' : `↓/→ ${next}   ↑/← ${previous}   / 命令   F2 解锁   Ctrl+C 退出`) : d.columns < 65 ? `↓↑ ${app.store.state.settings.step === 'auto' ? '翻页' : app.pageStep + '行'}  空格 下翻  / 命令  q 退出` : `空格/↓ ${next}   ↑/← ${previous}   j/k 逐行   / 命令   F2 锁定输入   q 退出`, 'dim');
+  const session = app.autoSeconds ? `自动 ${app.autoSeconds}s${app.autoPaused ? ' · 暂停' : ''}` : code ? 'local session' : '离线 · 无需账号';
+  pair(session, `${book.encoding} · ${code ? 'context.md' : 'TXT'}`, 'dim');
   return lines.slice(0, d.rows).join('\n') + (noColor ? '' : '\x1b[0m');
 }
 
